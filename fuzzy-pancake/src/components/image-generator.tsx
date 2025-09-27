@@ -22,7 +22,7 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
-import { X } from 'lucide-react';
+import { X, Upload, Image as ImageIcon, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fileToDataUrl } from '@/lib/image-utils';
@@ -105,6 +105,11 @@ export default function ImageGenerator() {
   const [model, setModel] = useState<ModelOption>('gemini');
   const [imageHistory, setImageHistory] = useState<GeneratedImage[]>([]);
   const promptInputRef = useRef<HTMLFormElement>(null);
+  const [photoSlots, setPhotoSlots] = useState<{ id: string; file: File | null; preview: string | null }[]>([
+    { id: 'photo1', file: null, preview: null },
+    { id: 'photo2', file: null, preview: null }
+  ]);
+  const [usePhotoCombinePrompt, setUsePhotoCombinePrompt] = useState(false);
 
   // Handle adding files to the input from external triggers (like from image history)
   const handleAddToInput = useCallback((files: File[]) => {
@@ -120,23 +125,128 @@ export default function ImageGenerator() {
     if (actions) {
       actions.clear();
     }
+    // Clear photo slots
+    setPhotoSlots([
+      { id: 'photo1', file: null, preview: null },
+      { id: 'photo2', file: null, preview: null }
+    ]);
   }, []);
+
+  // Handle photo slot file selection
+  const handlePhotoSlotChange = useCallback(async (slotId: string, file: File | null) => {
+    if (file) {
+      const preview = await fileToDataUrl(file);
+      setPhotoSlots(prev => prev.map(slot =>
+        slot.id === slotId ? { ...slot, file, preview } : slot
+      ));
+    } else {
+      setPhotoSlots(prev => prev.map(slot =>
+        slot.id === slotId ? { ...slot, file: null, preview: null } : slot
+      ));
+    }
+  }, []);
+
+  // Clear individual photo slot
+  const clearPhotoSlot = useCallback((slotId: string) => {
+    setPhotoSlots(prev => prev.map(slot =>
+      slot.id === slotId ? { ...slot, file: null, preview: null } : slot
+    ));
+  }, []);
+
+  // Auto-enable photo combine prompt when both slots are filled
+  useEffect(() => {
+    const filledSlots = photoSlots.filter(slot => slot.file !== null);
+    if (filledSlots.length === 2) {
+      setUsePhotoCombinePrompt(true);
+    } else if (filledSlots.length === 0) {
+      setUsePhotoCombinePrompt(false);
+    }
+  }, [photoSlots]);
+
+  // Custom drag and drop handler for the entire container
+  const handleContainerDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+    }
+  }, []);
+
+  const handleContainerDrop = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+    }
+
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      const imageFiles = files.filter(f => f.type.startsWith('image/'));
+
+      if (imageFiles.length > 0) {
+        // Fill photo slots first
+        const emptySlots = photoSlots.filter(slot => slot.file === null);
+
+        for (let i = 0; i < Math.min(imageFiles.length, emptySlots.length); i++) {
+          handlePhotoSlotChange(emptySlots[i].id, imageFiles[i]);
+        }
+
+        // If there are remaining images, add to prompt input
+        const remainingImages = imageFiles.slice(emptySlots.length);
+        if (remainingImages.length > 0) {
+          const actions = window.__promptInputActions;
+          if (actions) {
+            actions.addFiles(remainingImages);
+          }
+        }
+      }
+    }
+  }, [photoSlots, handlePhotoSlotChange]);
 
   // Component to bridge PromptInput context with external file operations
   function FileInputManager() {
     const attachments = usePromptInputAttachments();
 
+    // Custom file handler that prioritizes photo slots (for button clicks and paste)
+    const customAddFiles = useCallback((files: File[] | FileList) => {
+      const fileArray = Array.from(files);
+      const imageFiles = fileArray.filter(f => f.type.startsWith('image/'));
+
+      if (imageFiles.length > 0) {
+        // Try to fill photo slots first
+        const emptySlots = photoSlots.filter(slot => slot.file === null);
+
+        for (let i = 0; i < Math.min(imageFiles.length, emptySlots.length); i++) {
+          handlePhotoSlotChange(emptySlots[i].id, imageFiles[i]);
+        }
+
+        // If there are remaining images and photo slots are full, add to prompt input
+        const remainingImages = imageFiles.slice(emptySlots.length);
+        if (remainingImages.length > 0) {
+          attachments.add(remainingImages);
+        }
+      }
+
+      // Add non-image files directly to prompt input
+      const nonImageFiles = fileArray.filter(f => !f.type.startsWith('image/'));
+      if (nonImageFiles.length > 0) {
+        attachments.add(nonImageFiles);
+      }
+    }, [attachments, photoSlots, handlePhotoSlotChange]);
+
     // Store reference to attachment actions for external use
     useEffect(() => {
       window.__promptInputActions = {
-        addFiles: attachments.add,
-        clear: attachments.clear,
+        addFiles: customAddFiles,
+        clear: () => {
+          attachments.clear();
+          setPhotoSlots([
+            { id: 'photo1', file: null, preview: null },
+            { id: 'photo2', file: null, preview: null }
+          ]);
+        },
       };
 
       return () => {
         delete window.__promptInputActions;
       };
-    }, [attachments]);
+    }, [attachments, customAddFiles]);
 
     return null;
   }
@@ -150,26 +260,65 @@ export default function ImageGenerator() {
     async (message: PromptInputMessage) => {
       const hasText = Boolean(message.text?.trim());
       const hasAttachments = Boolean(message.files?.length);
+      const hasPhotoSlots = photoSlots.some(slot => slot.file !== null);
 
-      // Require either text prompt or attachments
-      if (!(hasText || hasAttachments)) {
+      const isEdit = hasAttachments || hasPhotoSlots;
+      let prompt = message.text?.trim() || '';
+
+      // Apply system prompt for photo combination if enabled and we have two photos
+      const hasPhotoCombineConditions = usePhotoCombinePrompt && photoSlots.filter(slot => slot.file !== null).length === 2;
+      if (hasPhotoCombineConditions) {
+        const systemPrompt = "Place the people from both photos together in a natural, realistic scene. Position them side by side or in a natural group arrangement as if they're genuinely together. Match the lighting, shadows, and color tones across both subjects. Ensure consistent image quality, focus, and style. Create a seamless, believable composition where both people appear to be in the same location at the same time.";
+        prompt = prompt ? `${systemPrompt} ${prompt}` : systemPrompt;
+      }
+
+      // Require either text prompt (including system prompt), attachments, or photo slots
+      if (!(prompt || hasAttachments || hasPhotoSlots)) {
         return;
       }
 
-      const isEdit = hasAttachments;
-      const prompt = message.text?.trim() || '';
+      // Combine photo slot files with regular attachments
+      const photoSlotFiles = photoSlots
+        .filter(slot => slot.file !== null)
+        .map(slot => ({
+          url: slot.preview!,
+          filename: slot.file!.name,
+          mediaType: slot.file!.type,
+          type: 'file' as const
+        }));
+
+      const allFiles = [
+        ...(message.files || []),
+        ...photoSlotFiles
+      ];
+
+      // Debug logging
+      console.log('Debug - handleSubmit:', {
+        hasText,
+        hasAttachments,
+        hasPhotoSlots,
+        prompt,
+        usePhotoCombinePrompt,
+        hasPhotoCombineConditions,
+        photoSlotFiles: photoSlotFiles.length,
+        allFiles: allFiles.length
+      });
 
       // Generate unique ID for this request
       const imageId = `img_${Date.now()}`;
 
       // Convert attachment blob URLs to permanent data URLs for persistent display
       const attachmentDataUrls =
-        message.files && message.files.length > 0
+        allFiles && allFiles.length > 0
           ? await Promise.all(
-              message.files
+              allFiles
                 .filter(f => f.mediaType?.startsWith('image/'))
                 .map(async f => {
                   try {
+                    // If it's already a data URL from photo slots, use it directly
+                    if (f.url.startsWith('data:')) {
+                      return f.url;
+                    }
                     const response = await fetch(f.url);
                     const blob = await response.blob();
                     return await fileToDataUrl(
@@ -206,11 +355,10 @@ export default function ImageGenerator() {
         let imageUrl: ImageResponse['imageUrl'];
 
         if (isEdit) {
-          const imageFiles =
-            message.files?.filter(
-              file =>
-                file.mediaType?.startsWith('image/') || file.type === 'file'
-            ) || [];
+          const imageFiles = allFiles.filter(
+            file =>
+              file.mediaType?.startsWith('image/') || file.type === 'file'
+          );
 
           if (imageFiles.length === 0) {
             throw new Error('No image files found in attachments');
@@ -219,6 +367,10 @@ export default function ImageGenerator() {
           try {
             const imageUrls = await Promise.all(
               imageFiles.map(async imageFile => {
+                // If it's already a data URL from photo slots, use it directly
+                if (imageFile.url.startsWith('data:')) {
+                  return imageFile.url;
+                }
                 // Convert blob URL to data URL for API
                 const response = await fetch(imageFile.url);
                 const blob = await response.blob();
@@ -272,16 +424,111 @@ export default function ImageGenerator() {
         );
       }
     },
-    [model]
+    [model, photoSlots, usePhotoCombinePrompt]
   );
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      onDragOver={handleContainerDragOver}
+      onDrop={handleContainerDrop}
+    >
+      {/* Photo Slots */}
+      <div className="grid grid-cols-2 gap-4">
+        {photoSlots.map((slot, index) => (
+          <div key={slot.id} className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Photo {index + 1}
+            </label>
+            <div className="relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  handlePhotoSlotChange(slot.id, file);
+                }}
+                className="hidden"
+                id={`photo-slot-${slot.id}`}
+              />
+              <label
+                htmlFor={`photo-slot-${slot.id}`}
+                className={`
+                  relative block w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors overflow-hidden
+                  ${slot.file ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-gray-400 bg-gray-50 hover:bg-gray-100'}
+                `}
+              >
+                {slot.preview ? (
+                  <>
+                    <img
+                      src={slot.preview}
+                      alt={`Photo ${index + 1} - ${slot.file?.name}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
+                      {slot.file?.name}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearPhotoSlot(slot.id);
+                      }}
+                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors shadow-lg"
+                    >
+                      <X size={14} />
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                    <Upload size={24} className="mb-2" />
+                    <span className="text-sm">Click to upload</span>
+                    <span className="text-xs text-gray-300">JPG, PNG, etc.</span>
+                  </div>
+                )}
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Photo Combine Settings */}
+      {photoSlots.some(slot => slot.file !== null) && (
+        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+          <div className="flex items-center space-x-3">
+            <Users className="w-5 h-5 text-blue-600" />
+            <div>
+              <p className="text-sm font-medium text-gray-900">
+                Photo Combination Mode
+              </p>
+              <p className="text-xs text-gray-500">
+                {photoSlots.filter(slot => slot.file !== null).length}/2 photos loaded • Combines people from uploaded photos
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={usePhotoCombinePrompt}
+                onChange={(e) => setUsePhotoCombinePrompt(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+            {usePhotoCombinePrompt && photoSlots.filter(slot => slot.file !== null).length === 2 && (
+              <span className="text-xs text-green-600 font-medium">Active</span>
+            )}
+          </div>
+        </div>
+      )}
+
       <PromptInput
         ref={promptInputRef}
         onSubmit={handleSubmit}
         className="relative"
-        globalDrop
+        globalDrop={false}
         multiple
         accept="image/*"
       >
@@ -297,7 +544,7 @@ export default function ImageGenerator() {
             <PromptInputActionMenu>
               <PromptInputActionMenuTrigger />
               <PromptInputActionMenuContent>
-                <PromptInputActionAddAttachments />
+                <PromptInputActionAddAttachments label="Add photos to slots" />
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
             <PromptInputModelSelect
