@@ -131,7 +131,7 @@ export async function compressImage(
 /**
  * Checks if a file is too large and needs compression
  */
-export function shouldCompressFile(file: File, maxSizeBytes: number = 5 * 1024 * 1024): boolean {
+export function shouldCompressFile(file: File, maxSizeBytes: number = 2 * 1024 * 1024): boolean {
   return file.size > maxSizeBytes;
 }
 
@@ -139,7 +139,7 @@ export function shouldCompressFile(file: File, maxSizeBytes: number = 5 * 1024 *
  * Processes a file for upload, compressing if necessary
  */
 export async function processImageForUpload(file: File): Promise<File> {
-  const maxSize = 5 * 1024 * 1024; // 5MB
+  const maxSize = 2 * 1024 * 1024; // 2MB (reduced for serverless limits)
   const unsupportedFormats = ['image/avif', 'image/heic', 'image/heif'];
 
   // Always convert unsupported formats, regardless of size
