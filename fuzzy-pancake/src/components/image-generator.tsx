@@ -25,7 +25,8 @@ import { Button } from '@/components/ui/button';
 import { X, Upload, Image as ImageIcon, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fileToDataUrl } from '@/lib/image-utils';
+import { fileToDataUrl, processImageForUpload, shouldCompressFile } from '@/lib/image-utils';
+import { saveImageToLocal, loadImagesFromLocal } from '@/lib/local-db';
 import type {
   EditImageRequest,
   GeneratedImage,
@@ -104,12 +105,14 @@ async function editImage(request: EditImageRequest): Promise<ImageResponse> {
 export default function ImageGenerator() {
   const [model, setModel] = useState<ModelOption>('gemini');
   const [imageHistory, setImageHistory] = useState<GeneratedImage[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const promptInputRef = useRef<HTMLFormElement>(null);
   const [photoSlots, setPhotoSlots] = useState<{ id: string; file: File | null; preview: string | null }[]>([
     { id: 'photo1', file: null, preview: null },
     { id: 'photo2', file: null, preview: null }
   ]);
   const [usePhotoCombinePrompt, setUsePhotoCombinePrompt] = useState(false);
+  const [compressionStatus, setCompressionStatus] = useState<Record<string, 'compressing' | 'compressed' | null>>({});
 
   // Handle adding files to the input from external triggers (like from image history)
   const handleAddToInput = useCallback((files: File[]) => {
@@ -135,14 +138,44 @@ export default function ImageGenerator() {
   // Handle photo slot file selection
   const handlePhotoSlotChange = useCallback(async (slotId: string, file: File | null) => {
     if (file) {
-      const preview = await fileToDataUrl(file);
-      setPhotoSlots(prev => prev.map(slot =>
-        slot.id === slotId ? { ...slot, file, preview } : slot
-      ));
+      try {
+        const needsCompression = shouldCompressFile(file);
+        const unsupportedFormats = ['image/avif', 'image/heic', 'image/heif'];
+        const needsConversion = unsupportedFormats.includes(file.type);
+
+        if (needsCompression || needsConversion) {
+          setCompressionStatus(prev => ({ ...prev, [slotId]: 'compressing' }));
+        }
+
+        // Process the image (compress/convert if needed)
+        const processedFile = await processImageForUpload(file);
+        const preview = await fileToDataUrl(processedFile);
+
+        setPhotoSlots(prev => prev.map(slot =>
+          slot.id === slotId ? { ...slot, file: processedFile, preview } : slot
+        ));
+
+        if (needsCompression || needsConversion) {
+          setCompressionStatus(prev => ({ ...prev, [slotId]: 'compressed' }));
+          // Clear compression status after 3 seconds
+          setTimeout(() => {
+            setCompressionStatus(prev => ({ ...prev, [slotId]: null }));
+          }, 3000);
+        }
+      } catch (error) {
+        console.error('Error processing image:', error);
+        setCompressionStatus(prev => ({ ...prev, [slotId]: null }));
+        // Fallback to original file if compression fails
+        const preview = await fileToDataUrl(file);
+        setPhotoSlots(prev => prev.map(slot =>
+          slot.id === slotId ? { ...slot, file, preview } : slot
+        ));
+      }
     } else {
       setPhotoSlots(prev => prev.map(slot =>
         slot.id === slotId ? { ...slot, file: null, preview: null } : slot
       ));
+      setCompressionStatus(prev => ({ ...prev, [slotId]: null }));
     }
   }, []);
 
@@ -151,6 +184,22 @@ export default function ImageGenerator() {
     setPhotoSlots(prev => prev.map(slot =>
       slot.id === slotId ? { ...slot, file: null, preview: null } : slot
     ));
+  }, []);
+
+  // Load saved images on component mount
+  useEffect(() => {
+    const loadSavedImages = async () => {
+      try {
+        const savedImages = await loadImagesFromLocal();
+        setImageHistory(savedImages);
+      } catch (error) {
+        console.error('Error loading saved images:', error);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadSavedImages();
   }, []);
 
   // Auto-enable photo combine prompt when both slots are filled
@@ -396,11 +445,19 @@ export default function ImageGenerator() {
         }
 
         // Update the existing placeholder entry with the result
+        const updatedImage = { ...placeholderImage, imageUrl, isLoading: false };
         setImageHistory(prev =>
           prev.map(img =>
-            img.id === imageId ? { ...img, imageUrl, isLoading: false } : img
+            img.id === imageId ? updatedImage : img
           )
         );
+
+        // Save to local storage
+        try {
+          await saveImageToLocal(updatedImage);
+        } catch (error) {
+          console.error('Error saving image to local storage:', error);
+        }
       } catch (error) {
         console.error(
           `Error ${isEdit ? 'editing' : 'generating'} image:`,
@@ -468,6 +525,16 @@ export default function ImageGenerator() {
                     <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
                       {slot.file?.name}
                     </div>
+                    {compressionStatus[slot.id] === 'compressing' && (
+                      <div className="absolute inset-0 bg-blue-500 bg-opacity-75 flex items-center justify-center">
+                        <div className="text-white text-xs font-medium">Compressing...</div>
+                      </div>
+                    )}
+                    {compressionStatus[slot.id] === 'compressed' && (
+                      <div className="absolute top-2 left-2 bg-green-500 text-white rounded-full px-2 py-1 text-xs font-medium">
+                        Compressed
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -583,6 +650,7 @@ export default function ImageGenerator() {
       <ImageHistory
         imageHistory={imageHistory}
         onAddToInput={handleAddToInput}
+        isLoading={isLoadingHistory}
       />
     </div>
   );

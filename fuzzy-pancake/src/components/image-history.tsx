@@ -159,11 +159,13 @@ const ImageHistoryItem = React.memo(function ImageHistoryItem({
 interface ImageHistoryProps {
   imageHistory: GeneratedImage[];
   onAddToInput: (files: File[]) => void;
+  isLoading?: boolean;
 }
 
 export const ImageHistory = React.memo(function ImageHistory({
   imageHistory,
   onAddToInput,
+  isLoading = false,
 }: ImageHistoryProps) {
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(
     null
@@ -177,6 +179,22 @@ export const ImageHistory = React.memo(function ImageHistory({
   const handleCloseDialog = useCallback(() => {
     setSelectedImage(null);
   }, []);
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Generated Images</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+              <Skeleton className="w-full h-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (imageHistory.length === 0) return null;
 
