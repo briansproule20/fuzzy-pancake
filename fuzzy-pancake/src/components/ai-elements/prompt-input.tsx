@@ -442,7 +442,10 @@ export const PromptInput = ({
       ...item,
     }));
 
-    onSubmit({ text: event.currentTarget.message.value, files }, event);
+    // Safely get the message value, defaulting to empty string if field doesn't exist
+    const messageValue = event.currentTarget.message?.value || '';
+
+    onSubmit({ text: messageValue, files }, event);
   };
 
   const ctx = useMemo<AttachmentsContext>(

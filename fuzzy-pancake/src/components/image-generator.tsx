@@ -22,7 +22,7 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
-import { X, Upload, Image as ImageIcon, Users } from 'lucide-react';
+import { X, Upload, Image as ImageIcon, Users, Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fileToDataUrl, processImageForUpload, shouldCompressFile } from '@/lib/image-utils';
@@ -113,6 +113,7 @@ export default function ImageGenerator() {
   ]);
   const [usePhotoCombinePrompt, setUsePhotoCombinePrompt] = useState(false);
   const [compressionStatus, setCompressionStatus] = useState<Record<string, 'compressing' | 'compressed' | null>>({});
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
 
   // Handle adding files to the input from external triggers (like from image history)
   const handleAddToInput = useCallback((files: File[]) => {
@@ -189,7 +190,28 @@ export default function ImageGenerator() {
     setPhotoSlots(prev => prev.map(slot =>
       slot.id === slotId ? { ...slot, file: null, preview: null } : slot
     ));
+    setCompressionStatus(prev => ({ ...prev, [slotId]: null }));
   }, []);
+
+  // Handle adding photos directly to photo slots
+  const handleAddPhotosToSlots = useCallback(() => {
+    photoFileInputRef.current?.click();
+  }, []);
+
+  const handlePhotoFileInput = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const emptySlots = photoSlots.filter(slot => slot.file === null);
+
+    for (let i = 0; i < Math.min(imageFiles.length, emptySlots.length); i++) {
+      await handlePhotoSlotChange(emptySlots[i].id, imageFiles[i]);
+    }
+
+    // Clear the input so the same file can be selected again if needed
+    e.target.value = '';
+  }, [photoSlots, handlePhotoSlotChange]);
 
   // Load saved images on component mount
   useEffect(() => {
@@ -495,6 +517,15 @@ export default function ImageGenerator() {
       onDragOver={handleContainerDragOver}
       onDrop={handleContainerDrop}
     >
+      {/* Hidden file input for photo slots */}
+      <input
+        ref={photoFileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handlePhotoFileInput}
+        className="hidden"
+      />
       {/* Photo Slots */}
       <div className="grid grid-cols-2 gap-4">
         {photoSlots.map((slot, index) => (
@@ -609,16 +640,19 @@ export default function ImageGenerator() {
           <PromptInputAttachments>
             {attachment => <PromptInputAttachment data={attachment} />}
           </PromptInputAttachments>
-          <PromptInputTextarea placeholder="Describe the image you want to generate, or attach an image and describe how to edit it..." />
         </PromptInputBody>
         <PromptInputToolbar>
           <PromptInputTools>
-            <PromptInputActionMenu>
-              <PromptInputActionMenuTrigger />
-              <PromptInputActionMenuContent>
-                <PromptInputActionAddAttachments label="Add photos to slots" />
-              </PromptInputActionMenuContent>
-            </PromptInputActionMenu>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleAddPhotosToSlots}
+              className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="Add photos to slots"
+            >
+              <Plus size={16} />
+            </Button>
             <PromptInputModelSelect
               onValueChange={value => {
                 setModel(value as ModelOption);
