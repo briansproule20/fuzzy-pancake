@@ -526,6 +526,13 @@ export default function ImageGenerator() {
         onChange={handlePhotoFileInput}
         className="hidden"
       />
+      {/* Info Text */}
+      <div className="text-center mb-6">
+        <p className="text-gray-600 text-sm">
+          Photo combiner that works best with photos of individuals. Try a photo of your younger self and current self!
+        </p>
+      </div>
+
       {/* Photo Slots */}
       <div className="grid grid-cols-2 gap-4">
         {photoSlots.map((slot, index) => (
