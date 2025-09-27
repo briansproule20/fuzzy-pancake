@@ -8,8 +8,9 @@ import {
   handleImageToFile,
   isImageActionable,
 } from '@/lib/image-actions';
+import { deleteImageFromLocal } from '@/lib/local-db';
 import type { GeneratedImage } from '@/lib/types';
-import { Copy, Download, Edit } from 'lucide-react';
+import { Copy, Download, Trash2 } from 'lucide-react';
 import NextImage from 'next/image';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ImageDetailsDialog } from './image-details-dialog';
@@ -41,21 +42,15 @@ const LoadingTimer = React.memo(function LoadingTimer({
 
 interface ImageHistoryItemProps {
   image: GeneratedImage;
-  onAddToInput: (files: File[]) => void;
   onImageClick: (image: GeneratedImage) => void;
+  onDelete: (imageId: string) => void;
 }
 
 const ImageHistoryItem = React.memo(function ImageHistoryItem({
   image,
-  onAddToInput,
   onImageClick,
+  onDelete,
 }: ImageHistoryItemProps) {
-  const handleAddToInput = useCallback(() => {
-    if (!isImageActionable(image)) return;
-
-    const file = handleImageToFile(image.imageUrl!, image.id);
-    onAddToInput([file]);
-  }, [image, onAddToInput]);
 
   const handleImageClick = useCallback(() => {
     onImageClick(image);
@@ -71,6 +66,13 @@ const ImageHistoryItem = React.memo(function ImageHistoryItem({
     if (!isImageActionable(image)) return;
     await handleImageCopy(image.imageUrl!);
   }, [image]);
+
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Are you sure you want to delete this image?')) {
+      onDelete(image.id);
+    }
+  }, [image.id, onDelete]);
 
   return (
     <div
@@ -108,6 +110,16 @@ const ImageHistoryItem = React.memo(function ImageHistoryItem({
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200">
             <Button
               size="sm"
+              onClick={handleDelete}
+              aria-label="Delete image"
+              title="Delete image"
+              className="h-8 w-8 p-0 bg-red-500/90 hover:bg-red-600 shadow-lg text-white hover:scale-110 active:scale-95 transition-transform duration-150 focus:ring-2 focus:ring-red-500"
+              disabled={!isImageActionable(image)}
+            >
+              <Trash2 size={14} />
+            </Button>
+            <Button
+              size="sm"
               onClick={e => {
                 e.stopPropagation();
                 handleCopy();
@@ -132,19 +144,6 @@ const ImageHistoryItem = React.memo(function ImageHistoryItem({
             >
               <Download size={14} />
             </Button>
-            <Button
-              size="sm"
-              onClick={e => {
-                e.stopPropagation();
-                handleAddToInput();
-              }}
-              aria-label="Edit this image"
-              title="Edit image"
-              className="h-8 w-8 p-0 bg-white/90 hover:bg-white shadow-lg text-gray-700 hover:text-gray-900 cursor-pointer hover:scale-110 active:scale-95 transition-transform duration-150 focus:ring-2 focus:ring-blue-500"
-              disabled={!isImageActionable(image)}
-            >
-              <Edit size={14} />
-            </Button>
           </div>
         </>
       ) : (
@@ -158,14 +157,14 @@ const ImageHistoryItem = React.memo(function ImageHistoryItem({
 
 interface ImageHistoryProps {
   imageHistory: GeneratedImage[];
-  onAddToInput: (files: File[]) => void;
   isLoading?: boolean;
+  onDeleteImage?: (imageId: string) => void;
 }
 
 export const ImageHistory = React.memo(function ImageHistory({
   imageHistory,
-  onAddToInput,
   isLoading = false,
+  onDeleteImage,
 }: ImageHistoryProps) {
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(
     null
@@ -179,6 +178,15 @@ export const ImageHistory = React.memo(function ImageHistory({
   const handleCloseDialog = useCallback(() => {
     setSelectedImage(null);
   }, []);
+
+  const handleDelete = useCallback(async (imageId: string) => {
+    try {
+      await deleteImageFromLocal(imageId);
+      onDeleteImage?.(imageId);
+    } catch (error) {
+      console.error('Error deleting image:', error);
+    }
+  }, [onDeleteImage]);
 
   // Show loading state
   if (isLoading) {
@@ -206,8 +214,8 @@ export const ImageHistory = React.memo(function ImageHistory({
           <ImageHistoryItem
             key={image.id}
             image={image}
-            onAddToInput={onAddToInput}
             onImageClick={handleImageClick}
+            onDelete={handleDelete}
           />
         ))}
       </div>
@@ -215,7 +223,6 @@ export const ImageHistory = React.memo(function ImageHistory({
       <ImageDetailsDialog
         image={selectedImage}
         onClose={handleCloseDialog}
-        onAddToInput={onAddToInput}
       />
     </div>
   );

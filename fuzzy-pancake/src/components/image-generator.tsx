@@ -122,6 +122,11 @@ export default function ImageGenerator() {
     }
   }, []);
 
+  // Handle deleting images from history
+  const handleDeleteImage = useCallback((imageId: string) => {
+    setImageHistory(prev => prev.filter(img => img.id !== imageId));
+  }, []);
+
   const clearForm = useCallback(() => {
     promptInputRef.current?.reset();
     const actions = window.__promptInputActions;
@@ -649,8 +654,8 @@ export default function ImageGenerator() {
 
       <ImageHistory
         imageHistory={imageHistory}
-        onAddToInput={handleAddToInput}
         isLoading={isLoadingHistory}
+        onDeleteImage={handleDeleteImage}
       />
     </div>
   );

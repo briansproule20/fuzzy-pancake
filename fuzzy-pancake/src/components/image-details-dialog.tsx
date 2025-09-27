@@ -16,11 +16,11 @@ import {
   isImageActionable,
 } from '@/lib/image-actions';
 import type { GeneratedImage, ImageActionHandlers } from '@/lib/types';
-import { Copy, Download, Edit } from 'lucide-react';
+import { Copy, Download } from 'lucide-react';
 import NextImage from 'next/image';
 import { useCallback } from 'react';
 
-interface ImageDetailsDialogProps extends ImageActionHandlers {
+interface ImageDetailsDialogProps {
   image: GeneratedImage | null;
   onClose: () => void;
 }
@@ -28,15 +28,7 @@ interface ImageDetailsDialogProps extends ImageActionHandlers {
 export function ImageDetailsDialog({
   image,
   onClose,
-  onAddToInput,
 }: ImageDetailsDialogProps) {
-  const handleAddToInput = useCallback(() => {
-    if (!image || !isImageActionable(image)) return;
-
-    const file = handleImageToFile(image.imageUrl!, image.id);
-    onAddToInput([file]);
-    onClose();
-  }, [image, onAddToInput, onClose]);
 
   const handleDownload = useCallback(() => {
     if (!image || !isImageActionable(image)) return;
@@ -147,15 +139,6 @@ export function ImageDetailsDialog({
             >
               <Download size={16} />
               Download
-            </Button>
-            <Button
-              onClick={handleAddToInput}
-              disabled={!isImageActionable(image)}
-              className="flex items-center gap-2 justify-center"
-              aria-label="Edit this image"
-            >
-              <Edit size={16} />
-              Edit
             </Button>
           </div>
         </div>
