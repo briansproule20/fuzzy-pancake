@@ -344,7 +344,7 @@ export default function ImageGenerator() {
       // Apply system prompt for photo combination if enabled and we have two photos
       const hasPhotoCombineConditions = usePhotoCombinePrompt && photoSlots.filter(slot => slot.file !== null).length === 2;
       if (hasPhotoCombineConditions) {
-        const systemPrompt = "Place the people from both photos together in a natural, realistic scene. Position them side by side or in a natural group arrangement as if they're genuinely together. Match the lighting, shadows, and color tones across both subjects. Ensure consistent image quality, focus, and style. Create a seamless, believable composition where both people appear to be in the same location at the same time.";
+        const systemPrompt = "Place both individuals from the uploaded photos together in the same natural scene. Match lighting and shadows. Keep proper scale and realistic positioning.";
         prompt = prompt ? `${systemPrompt} ${prompt}` : systemPrompt;
       }
 
